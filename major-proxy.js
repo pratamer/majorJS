@@ -1,6 +1,7 @@
 const fs = require('fs');
 const axios = require('axios');
 const colors = require('colors');
+const { DateTime } = require('luxon');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 
 class GLaDOS {
@@ -9,9 +10,10 @@ class GLaDOS {
         this.userInfoUrl = 'https://major.glados.app/api/users/';
         this.streakUrl = 'https://major.glados.app/api/user-visits/streak/';
         this.visitUrl = 'https://major.glados.app/api/user-visits/visit/';
-        this.rouletteUrl = 'https://major.glados.app/api/roulette';
+        this.rouletteUrl = 'https://major.glados.app/api/roulette/';
         this.holdCoinsUrl = 'https://major.glados.app/api/bonuses/coins/';
         this.tasksUrl = 'https://major.glados.app/api/tasks/';
+        this.swipeCoinUrl = 'https://major.glados.app/api/swipe_coin/';
         this.proxies = fs.readFileSync('proxy.txt', 'utf8').split('\n').filter(Boolean);
     }
 
@@ -21,8 +23,8 @@ class GLaDOS {
             'Accept-Encoding': 'gzip, deflate, br',
             'Accept-Language': 'vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5',
             'Content-Type': 'application/json',
-            'Origin': 'https://major.glados.app',
-            'Referer': 'https://major.glados.app/?tgWebAppStartParam=376905749',
+            'Origin': 'https://major.glados.app/reward',
+            'Referer': 'https://major.glados.app/',
             'Sec-Ch-Ua': '"Not/A)Brand";v="99", "Google Chrome";v="115", "Chromium";v="115"',
             'Sec-Ch-Ua-Mobile': '?0',
             'Sec-Ch-Ua-Platform': '"Windows"',
@@ -45,7 +47,7 @@ class GLaDOS {
 
     async waitWithCountdown(seconds) {
         for (let i = seconds; i >= 0; i--) {
-            process.stdout.write(`\r[*] Waiting ${i} seconds to continue...`);
+            process.stdout.write(`\r[*] Chờ ${i} giây để tiếp tục...`);
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
         console.log('');
@@ -58,99 +60,113 @@ class GLaDOS {
             if (response.status === 200) {
                 return response.data.ip;
             } else {
-                throw new Error(`Cannot check IP of proxy. Status code: ${response.status}`);
+                throw new Error(`Không thể kiểm tra IP của proxy. Status code: ${response.status}`);
             }
         } catch (error) {
-            throw new Error(`Error checking IP of proxy: ${error.message}`);
+            throw new Error(`Error khi kiểm tra IP của proxy: ${error.message}`);
         }
     }
 
-    async makeRequest(method, url, data = null, token = null, proxyIndex) {
+    async makeRequest(method, url, data = null, token = null, proxy) {
         const headers = this.headers(token);
-        const proxy = this.proxies[proxyIndex];
-        const httpsAgent = new HttpsProxyAgent(proxy);
+        const proxyAgent = new HttpsProxyAgent(proxy);
+        const config = {
+            method,
+            url,
+            headers,
+            httpsAgent: proxyAgent,
+        };
+
+        if (data) {
+            config.data = data;
+        }
 
         try {
-            const config = {
-                method,
-                url,
-                headers,
-                httpsAgent,
-            };
-
-            if (data) {
-                config.data = data;
-            }
-
             const response = await axios(config);
             return response.data;
         } catch (error) {
-            this.log(`Error: ${error.message}`);
-            return null;
-        }
-    }
-
-    async authenticate(init_data, proxyIndex) {
-        return this.makeRequest('POST', this.authUrl, { init_data }, null, proxyIndex);
-    }
-
-    async getUserInfo(userId, token, proxyIndex) {
-        return this.makeRequest('GET', `${this.userInfoUrl}${userId}/`, null, token, proxyIndex);
-    }
-
-    async getStreak(token, proxyIndex) {
-        return this.makeRequest('GET', this.streakUrl, null, token, proxyIndex);
-    }
-
-    async postVisit(token, proxyIndex) {
-        return this.makeRequest('POST', this.visitUrl, {}, token, proxyIndex);
-    }
-
-    async spinRoulette(token, proxyIndex) {
-        try {
-            const result = await this.makeRequest('POST', this.rouletteUrl, {}, token, proxyIndex);
-            if (result && result.rating_award > 0) {
-                this.log(`Successfully spun, received ${result.rating_award} stars`.green);
-            } else {
-                this.log(`Spin failed, need to invite more friends or wait for the next day`.yellow);
+            if (error.response && error.response.data) {
+                return error.response.data;
             }
-            return result;
-        } catch (error) {
-            this.log(`Cannot spin today`.yellow);
-            return null;
+            throw error;
         }
     }
 
-    async holdCoins(token, proxyIndex) {
+    async authenticate(init_data, proxy) {
+        const payload = { init_data };
+        return this.makeRequest('post', this.authUrl, payload, null, proxy);
+    }
+
+    async getUserInfo(userId, token, proxy) {
+        return this.makeRequest('get', `${this.userInfoUrl}${userId}/`, null, token, proxy);
+    }
+
+    async getStreak(token, proxy) {
+        return this.makeRequest('get', this.streakUrl, null, token, proxy);
+    }
+
+    async postVisit(token, proxy) {
+        return this.makeRequest('post', this.visitUrl, {}, token, proxy);
+    }
+
+    async spinRoulette(token, proxy) {
+        return this.makeRequest('post', this.rouletteUrl, {}, token, proxy);
+    }
+
+
+    async holdCoins(token, proxy) {
         const coins = Math.floor(Math.random() * (950 - 900 + 1)) + 900;
-        const result = await this.makeRequest('POST', this.holdCoinsUrl, { coins }, token, proxyIndex);
-        if (result && result.success) {
-            this.log(`Successfully held coins, received ${coins} stars`.green);
-        } else if (result) {
-            this.log(`Failed to hold coins`.red);
+        const payload = { coins };
+        const result = await this.makeRequest('post', this.holdCoinsUrl, payload, token, proxy);
+        if (result.success) {
+            this.log(`HOLD coin thành công, nhận ${coins} sao`.green);
+        } else if (result.detail && result.detail.blocked_until) {
+            const blockedTime = DateTime.fromSeconds(result.detail.blocked_until).setZone('system').toLocaleString(DateTime.DATETIME_MED);
+            this.log(`HOLD coin không thành công, cần mời thêm ${result.detail.need_invites} bạn hoặc chờ đến ${blockedTime}`.yellow);
         } else {
-            this.log(`You have already held coins today`.red);
+            this.log(`HOLD coin không thành công`.red);
         }
         return result;
     }
 
-    async getDailyTasks(token, proxyIndex) {
-        const tasks = await this.makeRequest('GET', `${this.tasksUrl}?is_daily=false`, null, token, proxyIndex);
-        if (tasks) {
-            this.log(`Task list:`.magenta);
-            tasks.forEach(task => this.log(`- ${task.id}: ${task.title}`));
+    async swipeCoin(token, proxy) {
+        const getResponse = await this.makeRequest('get', this.swipeCoinUrl, null, token, proxy);
+        if (getResponse.success) {
+            const coins = Math.floor(Math.random() * (1300 - 1000 + 1)) + 1000;
+            const payload = { coins };
+            const result = await this.makeRequest('post', this.swipeCoinUrl, payload, token, proxy);
+            if (result.success) {
+                this.log(`Swipe coin thành công, nhận ${coins} sao`.green);
+            } else {
+                this.log(`Swipe coin không thành công`.red);
+            }
+            return result;
+        } else if (getResponse.detail && getResponse.detail.blocked_until) {
+            const blockedTime = DateTime.fromSeconds(getResponse.detail.blocked_until).setZone('system').toLocaleString(DateTime.DATETIME_MED);
+            this.log(`Swipe coin không thành công, cần mời thêm ${getResponse.detail.need_invites} bạn hoặc chờ đến ${blockedTime}`.yellow);
         } else {
-            this.log(`Error getting daily tasks`.red);
+            this.log(`Không thể lấy thông tin swipe coin`.red);
         }
-        return tasks;
+        return getResponse;
     }
 
-    async completeTask(token, task, proxyIndex) {
-        const result = await this.makeRequest('POST', this.tasksUrl, { task_id: task.id }, token, proxyIndex);
-        if (result && result.is_completed) {
-            this.log(`Completed task ${task.id}: ${task.title.yellow} .. status: success`.green);
-        } else if (result) {
-            this.log(`Cannot complete task ${task.id}: ${task.title}`.red);
+    async getDailyTasks(token, proxy) {
+        const tasks = await this.makeRequest('get', `${this.tasksUrl}?is_daily=false`, null, token, proxy);
+        if (Array.isArray(tasks)) {
+            this.log(`Danh sách nhiệm vụ:`.magenta);
+            tasks.forEach(task => this.log(`- ${task.id}: ${task.title}`.cyan));
+            return tasks.map(task => ({ id: task.id, title: task.title }));
+        } else {
+            this.log(`Không thể lấy danh sách nhiệm vụ`.red);
+            return null;
+        }
+    }
+
+    async completeTask(token, task, proxy) {
+        const payload = { task_id: task.id };
+        const result = await this.makeRequest('post', this.tasksUrl, payload, token, proxy);
+        if (result.is_completed) {
+            this.log(`Làm nhiệm vụ ${task.id}: ${task.title.yellow} .. trạng thái: thành công`.green);
         }
         return result;
     }
@@ -168,58 +184,73 @@ class GLaDOS {
         while (true) {
             for (let i = 0; i < data.length; i++) {
                 const init_data = data[i].trim();
-                const proxyIndex = i % this.proxies.length;
+                const proxy = this.proxies[i];
+
+                let proxyIP = 'Unknown';
+                try {
+                    proxyIP = await this.checkProxyIP(proxy);
+                } catch (error) {
+                    this.log(`Không thể kiểm tra IP của proxy: ${error.message}`.yellow);
+                }
 
                 try {
-                    const proxyIP = await this.checkProxyIP(this.proxies[proxyIndex]);
-                    const authResult = await this.authenticate(init_data, proxyIndex);
-                    
+                    const authResult = await this.authenticate(init_data, proxy);
                     if (authResult) {
                         const { access_token, user } = authResult;
                         const { id, first_name } = user;
 
-                        console.log(`========== Account ${i + 1} | ${first_name.green} | IP: ${proxyIP} ==========`);
+                        console.log(`========== Tài khoản ${i + 1} | ${first_name.green} | ip: ${proxyIP} ==========`);
 
-                        const userInfo = await this.getUserInfo(id, access_token, proxyIndex);
+                        const userInfo = await this.getUserInfo(id, access_token, proxy);
                         if (userInfo) {
-                            this.log(`Current stars: ${userInfo.rating.toString().white}`.green);
+                            this.log(`Số sao đang có: ${userInfo.rating.toString().white}`.green);
                         }
 
-                        const streakInfo = await this.getStreak(access_token, proxyIndex);
+                        const streakInfo = await this.getStreak(access_token, proxy);
                         if (streakInfo) {
-                            this.log(`Checked in for ${streakInfo.streak} days!`.green);
+                            this.log(`Đã điểm danh ${streakInfo.streak} ngày!`.green);
                         }
 
-                        const visitResult = await this.postVisit(access_token, proxyIndex);
+                        const visitResult = await this.postVisit(access_token, proxy);
                         if (visitResult) {
                             if (visitResult.is_increased) {
-                                this.log(`Successfully checked in for day ${visitResult.streak}`.green);
+                                this.log(`Điểm danh thành công ngày ${visitResult.streak}`.green);
                             } else {
-                                this.log(`Already checked in. Current streak: ${visitResult.streak}`.yellow);
+                                this.log(`Đã điểm danh trước đó. Streak hiện tại: ${visitResult.streak}`.yellow);
                             }
                         }
 
-                        await this.spinRoulette(access_token, proxyIndex);
-                        await this.holdCoins(access_token, proxyIndex);
+                        const rouletteResult = await this.spinRoulette(access_token, proxy);
+                        if (rouletteResult) {
+                            if (rouletteResult.rating_award > 0) {
+                                this.log(`Spin thành công, nhận được ${rouletteResult.rating_award} sao`.green);
+                            } else if (rouletteResult.detail && rouletteResult.detail.blocked_until) {
+                                const blockedTime = DateTime.fromSeconds(rouletteResult.detail.blocked_until).setZone('system').toLocaleString(DateTime.DATETIME_MED);
+                                this.log(`Spin không thành công, cần mời thêm ${rouletteResult.detail.need_invites} bạn hoặc chờ đến ${blockedTime}`.yellow);
+                            } else {
+                                this.log(`Kết quả spin không xác định`.red);
+                            }
+                        }
 
-                        const tasks = await this.getDailyTasks(access_token, proxyIndex);
+                        await this.holdCoins(access_token, proxy);
+                        await this.swipeCoin(access_token, proxy);
+
+                        const tasks = await this.getDailyTasks(access_token, proxy);
                         if (tasks) {
                             for (const task of tasks) {
-                                await this.completeTask(access_token, task, proxyIndex);
+                                await this.completeTask(access_token, task, proxy);
                                 await this.sleep(1000);
                             }
                         }
-
                     } else {
-                        this.log(`Cannot read account data ${i + 1}`);
-                    }
-
-                    if (i < data.length - 1) {
-                        await this.waitWithCountdown(3);
+                        this.log(`Không đọc được dữ liệu tài khoản ${i + 1}`);
                     }
                 } catch (error) {
-                    this.log(`Cannot read account data ${i + 1}: ${error.message}`);
-                    continue;
+                    this.log(`Lỗi xử lý tài khoản ${i + 1}: ${error.message}`.red);
+                }
+
+                if (i < data.length - 1) {
+                    await this.waitWithCountdown(3);
                 }
             }
             await this.waitWithCountdown(28850);

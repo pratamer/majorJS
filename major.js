@@ -1,6 +1,7 @@
 const fs = require('fs');
 const axios = require('axios');
 const colors = require('colors');
+const { DateTime } = require('luxon');
 
 class GLaDOS {
     constructor() {
@@ -8,9 +9,10 @@ class GLaDOS {
         this.userInfoUrl = 'https://major.glados.app/api/users/';
         this.streakUrl = 'https://major.glados.app/api/user-visits/streak/';
         this.visitUrl = 'https://major.glados.app/api/user-visits/visit/';
-        this.rouletteUrl = 'https://major.glados.app/api/roulette';
+        this.rouletteUrl = 'https://major.glados.app/api/roulette/';
         this.holdCoinsUrl = 'https://major.glados.app/api/bonuses/coins/';
         this.tasksUrl = 'https://major.glados.app/api/tasks/';
+        this.swipeCoinUrl = 'https://major.glados.app/api/swipe_coin/';
     }
 
     headers(token = null) {
@@ -19,8 +21,8 @@ class GLaDOS {
             'Accept-Encoding': 'gzip, deflate, br',
             'Accept-Language': 'vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5',
             'Content-Type': 'application/json',
-            'Origin': 'https://major.glados.app',
-            'Referer': 'https://major.glados.app/?tgWebAppStartParam=376905749',
+            'Origin': 'https://major.glados.app/reward',
+            'Referer': 'https://major.glados.app/',
             'Sec-Ch-Ua': '"Not/A)Brand";v="99", "Google Chrome";v="115", "Chromium";v="115"',
             'Sec-Ch-Ua-Mobile': '?0',
             'Sec-Ch-Ua-Platform': '"Windows"',
@@ -43,7 +45,7 @@ class GLaDOS {
 
     async waitWithCountdown(seconds) {
         for (let i = seconds; i >= 0; i--) {
-            process.stdout.write(`\r[*] Waiting ${i} seconds to continue...`);
+            process.stdout.write(`\r[*] Chờ ${i} giây để tiếp tục...`);
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
         console.log('');
@@ -121,24 +123,57 @@ class GLaDOS {
         try {
             const response = await axios.post(this.holdCoinsUrl, payload, { headers });
             if (response.data.success) {
-                this.log(`Successfully held ${coins} coins`.green);
+                this.log(`HOLD coin thành công, nhận ${coins} sao`.green);
             } else {
-                this.log(`Failed to hold coins`.red);
+                this.log(`HOLD coin không thành công`.red);
             }
             return response.data;
         } catch (error) {
-            this.log(`You have already held coins today`.red);
+            if (error.response && error.response.data) {
+                return error.response.data;
+            }
+            this.log(`Lỗi rồi: ${error.message}`);
             return null;
         }
     }
 
+    async swipeCoin(token) {
+        const headers = this.headers(token);
+
+        try {
+            const getResponse = await axios.get(this.swipeCoinUrl, { headers });
+            if (getResponse.data.success) {
+
+                const coins = Math.floor(Math.random() * (1300 - 1000 + 1)) + 1000;
+                const payload = { coins };
+
+                const postResponse = await axios.post(this.swipeCoinUrl, payload, { headers });
+                if (postResponse.data.success) {
+                    this.log(`Swipe coin thành công, nhận ${coins} sao`.green);
+                } else {
+                    this.log("Swipe coin không thành công".red);
+                }
+                return postResponse.data;
+            } else {
+                this.log("Lỗi không lấy được thông tin swipe coin".red);
+                return null;
+            }
+        } catch (error) {
+            if (error.response && error.response.data) {
+                return error.response.data;
+            }
+            this.log(`Lỗi rồi: ${error.message}`);
+            return null;
+        }
+    }
+    
     async getDailyTasks(token) {
         const headers = this.headers(token);
 
         try {
             const response = await axios.get(`${this.tasksUrl}?is_daily=false`, { headers });
             const tasks = response.data.map(task => ({ id: task.id, title: task.title }));
-            this.log(`Task list:`.magenta);
+            this.log(`Danh sách nhiệm vụ:`.magenta);
             tasks.forEach(task => this.log(`- ${task.id}: ${task.title}`));
             return tasks;
         } catch (error) {
@@ -154,13 +189,13 @@ class GLaDOS {
         try {
             const response = await axios.post(this.tasksUrl, payload, { headers });
             if (response.data.is_completed) {
-                this.log(`Task ${task.id}: ${task.title.yellow} .. Status: Success`.green);
+                this.log(`Làm nhiệm vụ ${task.id}: ${task.title.yellow} .. trạng thái: thành công`.green);
             } else {
-                // this.log(`Task ${task.id}: ${task.title.yellow} .. Status: Failed`.red);
+//                this.log(`Làm nhiệm vụ ${task.id}: ${task.title.yellow} .. trạng thái: không thành công`.red);
             }
             return response.data;
         } catch (error) {
-            this.log(`Cannot complete task ${task.id}: ${task.title}`.red);
+            this.log(`Không thể hoàn thành nhiệm vụ ${task.id}: ${task.title}`.red);
             return null;
         }
     }
@@ -184,40 +219,49 @@ class GLaDOS {
                     const { access_token, user } = authResult;
                     const { id, first_name } = user;
 
-                    console.log(`========== Account ${i + 1} | ${first_name.green} ==========`);
+                    console.log(`========== Tài khoản ${i + 1} | ${first_name.green} ==========`);
 
                     const userInfo = await this.getUserInfo(id, access_token);
                     if (userInfo) {
-                        this.log(`Current stars: ${userInfo.rating.toString().white}`.green);
+                        this.log(`Số sao đang có: ${userInfo.rating.toString().white}`.green);
                     }
 
                     const streakInfo = await this.getStreak(access_token);
                     if (streakInfo) {
-                        this.log(`Checked in for ${streakInfo.streak} days!`.green);
+                        this.log(`Đã điểm danh ${streakInfo.streak} ngày!`.green);
                     }
 
                     const visitResult = await this.postVisit(access_token);
                     if (visitResult) {
                         if (visitResult.is_increased) {
-                            this.log(`Checked in successfully on day ${visitResult.streak}`.green);
+                            this.log(`Điểm danh thành công ngày ${visitResult.streak}`.green);
                         } else {
-                            this.log(`Already checked in. Current streak: ${visitResult.streak}`.yellow);
+                            this.log(`Đã điểm danh trước đó. Streak hiện tại: ${visitResult.streak}`.yellow);
                         }
                     }
 
                     const rouletteResult = await this.spinRoulette(access_token);
                     if (rouletteResult) {
                         if (rouletteResult.rating_award > 0) {
-                            this.log(`Spin successful, received ${rouletteResult.rating_award} stars`.green);
-                        } else if (rouletteResult.detail) {
-                            this.log(`Spin failed, invite ${rouletteResult.detail.need_invites} more friends or try tomorrow`.yellow);
+                            this.log(`Spin thành công, nhận được ${rouletteResult.rating_award} sao`.green);
+                        } else if (rouletteResult.detail && rouletteResult.detail.blocked_until) {
+                            const blockedTime = DateTime.fromSeconds(rouletteResult.detail.blocked_until).setZone('system').toLocaleString(DateTime.DATETIME_MED);
+                            this.log(`Spin không thành công, cần mời thêm ${rouletteResult.detail.need_invites} bạn hoặc chờ đến ${blockedTime}`.yellow);
                         } else {
-                            this.log(`Undefined spin result`.red);
+                            this.log(`Kết quả spin không xác định`.red);
                         }
                     }
 
                     const holdCoinsResult = await this.holdCoins(access_token);
-
+                    if (holdCoinsResult.detail && holdCoinsResult.detail.blocked_until) {
+                        const blockedTime = DateTime.fromSeconds(holdCoinsResult.detail.blocked_until).setZone('system').toLocaleString(DateTime.DATETIME_MED);
+                        this.log(`HOLD coin không thành công, cần mời thêm ${holdCoinsResult.detail.need_invites} bạn hoặc chờ đến ${blockedTime}`.yellow);
+                    }
+                    const swipeCoinResult = await this.swipeCoin(access_token);
+                    if (swipeCoinResult.detail && swipeCoinResult.detail.blocked_until) {
+                        const blockedTime = DateTime.fromSeconds(swipeCoinResult.detail.blocked_until).setZone('system').toLocaleString(DateTime.DATETIME_MED);
+                        this.log(`Swipe coin không thành công, cần mời thêm ${swipeCoinResult.detail.need_invites} bạn hoặc chờ đến ${blockedTime}`.yellow);
+                    }
                     const tasks = await this.getDailyTasks(access_token);
                     if (tasks) {
                         for (const task of tasks) {
@@ -227,7 +271,7 @@ class GLaDOS {
                     }
 
                 } else {
-                    this.log(`Failed to retrieve account data ${i + 1}`);
+                    this.log(`Không đọc được dữ liệu tài khoản ${i + 1}`);
                 }
 
                 if (i < data.length - 1) {
